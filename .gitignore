@@ -19,3 +19,12 @@
 
 # Go workspace file
 go.work
+
+# used by the Makefile
+/build/_workspace/
+/build/cache/
+/build/bin/
+/mive*.zip
+
+.idea
+.vscode
