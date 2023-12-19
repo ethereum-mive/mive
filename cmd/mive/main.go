@@ -7,6 +7,10 @@ import (
 	"github.com/ethereum-mive/mive/internal/flags"
 )
 
+const (
+	clientIdentifier = "mive" // Client identifier
+)
+
 var app = flags.NewApp("the mive command line interface")
 
 func main() {

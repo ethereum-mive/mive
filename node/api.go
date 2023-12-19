@@ -192,7 +192,7 @@ func (api *adminAPI) StopWS() (bool, error) {
 
 // Datadir retrieves the current data directory the node is using.
 func (api *adminAPI) Datadir() string {
-	return api.node.config.DataDir
+	return api.node.DataDir()
 }
 
 // web3API offers helper utils

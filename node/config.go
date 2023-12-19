@@ -41,6 +41,9 @@ type Config struct {
 	// of the current executable is used.
 	Name string `toml:"-"`
 
+	// Version should be set to the version number of the program.
+	Version string `toml:"-"`
+
 	// DataDir is the file system folder the node should use for any data storage
 	// requirements. The configured data directory will not be directly shared with
 	// registered services, instead those can use utility methods to create/access

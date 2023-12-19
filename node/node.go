@@ -601,6 +601,11 @@ func (n *Node) Config() *Config {
 	return n.config
 }
 
+// DataDir retrieves the current datadir used by the protocol stack.
+func (n *Node) DataDir() string {
+	return n.config.DataDir
+}
+
 // InstanceDir retrieves the instance directory used by the protocol stack.
 func (n *Node) InstanceDir() string {
 	return n.config.instanceDir()
