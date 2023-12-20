@@ -9,21 +9,39 @@ import (
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/core/vm"
 	"github.com/ethereum/go-ethereum/ethclient"
+	"github.com/ethereum/go-ethereum/ethdb"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/params"
 )
 
 type BlockChain struct {
-	ctx       context.Context
-	ethClient *ethclient.Client
+	chainConfig *params.ChainConfig // Chain & network configuration
 
 	engine   consensus.Engine
 	vmConfig vm.Config
+
+	ethClient *ethclient.Client
+
+	ctx       context.Context
+	ctxCancel context.CancelFunc
+}
+
+func NewBlockChain(db ethdb.Database, engine consensus.Engine, vmConfig vm.Config, etcClient *ethclient.Client) (*BlockChain, error) {
+	ctx, ctxCancel := context.WithCancel(context.Background())
+
+	bc := &BlockChain{
+		engine:    engine,
+		vmConfig:  vmConfig,
+		ethClient: etcClient,
+		ctx:       ctx,
+		ctxCancel: ctxCancel,
+	}
+
+	return bc, nil
 }
 
 func (bc *BlockChain) Config() *params.ChainConfig {
-	// TODO
-	return &params.ChainConfig{}
+	return bc.chainConfig
 }
 
 func (bc *BlockChain) CurrentHeader() *types.Header {

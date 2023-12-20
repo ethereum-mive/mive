@@ -12,7 +12,9 @@ import (
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/core/vm"
 	"github.com/ethereum/go-ethereum/crypto"
-	"github.com/ethereum/go-ethereum/params"
+	gethparams "github.com/ethereum/go-ethereum/params"
+
+	"github.com/ethereum-mive/mive/params"
 )
 
 // StateProcessor is a basic Processor, which takes care of transitioning
@@ -46,13 +48,13 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, cfg
 	)
 
 	// Mutate the block and state according to any hard-fork specs
-	if p.config.DAOForkSupport && p.config.DAOForkBlock != nil && p.config.DAOForkBlock.Cmp(block.Number()) == 0 {
+	if p.config.Eth.DAOForkSupport && p.config.Eth.DAOForkBlock != nil && p.config.Eth.DAOForkBlock.Cmp(block.Number()) == 0 {
 		misc.ApplyDAOHardFork(statedb)
 	}
 	var (
 		context = core.NewEVMBlockContext(header, p.bc, nil)
-		vmenv   = vm.NewEVM(context, vm.TxContext{}, statedb, p.config, cfg)
-		signer  = types.MakeSigner(p.config, header.Number, header.Time)
+		vmenv   = vm.NewEVM(context, vm.TxContext{}, statedb, p.config.Eth, cfg)
+		signer  = types.MakeSigner(p.config.Eth, header.Number, header.Time)
 	)
 	if beaconRoot := block.BeaconRoot(); beaconRoot != nil {
 		core.ProcessBeaconBlockRoot(*beaconRoot, vmenv, statedb)
@@ -90,10 +92,10 @@ func applyTransaction(msg *core.Message, config *params.ChainConfig, gp *core.Ga
 
 	// Update the state with pending changes.
 	var root []byte
-	if config.IsByzantium(blockNumber) {
+	if config.Eth.IsByzantium(blockNumber) {
 		statedb.Finalise(true)
 	} else {
-		root = statedb.IntermediateRoot(config.IsEIP158(blockNumber)).Bytes()
+		root = statedb.IntermediateRoot(config.Eth.IsEIP158(blockNumber)).Bytes()
 	}
 	*usedGas += result.UsedGas
 
@@ -109,7 +111,7 @@ func applyTransaction(msg *core.Message, config *params.ChainConfig, gp *core.Ga
 	receipt.GasUsed = result.UsedGas
 
 	if tx.Type() == types.BlobTxType {
-		receipt.BlobGasUsed = uint64(len(tx.BlobHashes()) * params.BlobTxBlobGasPerBlob)
+		receipt.BlobGasUsed = uint64(len(tx.BlobHashes()) * gethparams.BlobTxBlobGasPerBlob)
 		receipt.BlobGasPrice = evm.Context.BlobBaseFee
 	}
 
