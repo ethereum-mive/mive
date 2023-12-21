@@ -46,13 +46,12 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, cfg
 		allLogs     []*types.Log
 		gp          = new(core.GasPool).AddGas(block.GasLimit())
 	)
-
 	// Mutate the block and state according to any hard-fork specs
 	if p.config.Eth.DAOForkSupport && p.config.Eth.DAOForkBlock != nil && p.config.Eth.DAOForkBlock.Cmp(block.Number()) == 0 {
 		misc.ApplyDAOHardFork(statedb)
 	}
 	var (
-		context = core.NewEVMBlockContext(header, p.bc, nil)
+		context = NewEVMBlockContext(header, p.bc, nil, p.config)
 		vmenv   = vm.NewEVM(context, vm.TxContext{}, statedb, p.config.Eth, cfg)
 		signer  = types.MakeSigner(p.config.Eth, header.Number, header.Time)
 	)
@@ -61,9 +60,13 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, cfg
 	}
 	// Iterate over and process the individual transactions
 	for i, tx := range block.Transactions() {
-		msg, err := TransactionToMessage(tx, signer)
+		msg, err := TransactionToMessage(tx, signer, header.BaseFee, p.config)
 		if err != nil {
 			return nil, nil, 0, fmt.Errorf("could not apply tx %d [%v]: %w", i, tx.Hash().Hex(), err)
+		}
+		if msg == nil {
+			// Skip the transaction since it is not a valid Mive transaction.
+			continue
 		}
 		statedb.SetTxContext(tx.Hash(), i)
 		receipt, err := applyTransaction(msg, p.config, gp, statedb, blockNumber, blockHash, tx, usedGas, vmenv)
