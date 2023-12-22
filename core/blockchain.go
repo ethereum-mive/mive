@@ -2,20 +2,26 @@ package core
 
 import (
 	"context"
-	"math/big"
+	"sync"
+	"sync/atomic"
 
-	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/consensus"
+	"github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/core/vm"
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/ethereum/go-ethereum/ethdb"
-	"github.com/ethereum/go-ethereum/log"
-	"github.com/ethereum/go-ethereum/params"
+
+	"github.com/ethereum-mive/mive/params"
 )
 
 type BlockChain struct {
 	chainConfig *params.ChainConfig // Chain & network configuration
+
+	wg            sync.WaitGroup //
+	quit          chan struct{}  // shutdown signal, closed in Stop.
+	stopping      atomic.Bool    // false if chain is running, true when stopped
+	procInterrupt atomic.Bool    // interrupt signaler for block processing
 
 	engine   consensus.Engine
 	vmConfig vm.Config
@@ -40,55 +46,26 @@ func NewBlockChain(db ethdb.Database, engine consensus.Engine, vmConfig vm.Confi
 	return bc, nil
 }
 
-func (bc *BlockChain) Config() *params.ChainConfig {
-	return bc.chainConfig
-}
-
-func (bc *BlockChain) CurrentHeader() *types.Header {
-	header, err := bc.ethClient.HeaderByNumber(bc.ctx, nil)
-	if err != nil {
-		log.Error("Get current block header", "err", err)
-		return nil
+func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error) {
+	// If the chain is terminating, don't even bother starting up.
+	if bc.insertStopped() {
+		return 0, nil
 	}
-	return header
+
+	// Start a parallel signature recovery (signer will fluke on fork transition, minimal perf loss)
+	core.SenderCacher.RecoverFromBlocks(types.MakeSigner(bc.chainConfig.Eth, chain[0].Number(), chain[0].Time()), chain)
+
+	return 0, nil
 }
 
-// GetHeader retrieves a block header from the database by hash and number.
-func (bc *BlockChain) GetHeader(hash common.Hash, number uint64) *types.Header {
-	header, err := bc.ethClient.HeaderByHash(bc.ctx, hash)
-	if err != nil {
-		log.Error("Get block header", "hash", hash, "err", err)
-		return nil
-	}
-	if header.Number.Cmp(new(big.Int).SetUint64(number)) != 0 {
-		log.Error("Get block header", "hash", hash, "err", consensus.ErrInvalidNumber)
-		return nil
-	}
-	return header
+// StopInsert interrupts all insertion methods, causing them to return
+// errInsertionInterrupted as soon as possible. Insertion is permanently disabled after
+// calling this method.
+func (bc *BlockChain) StopInsert() {
+	bc.procInterrupt.Store(true)
 }
 
-func (bc *BlockChain) GetHeaderByNumber(number uint64) *types.Header {
-	header, err := bc.ethClient.HeaderByNumber(bc.ctx, new(big.Int).SetUint64(number))
-	if err != nil {
-		log.Error("Get block header", "number", number, "err", err)
-		return nil
-	}
-	return header
+// insertStopped returns true after StopInsert has been called.
+func (bc *BlockChain) insertStopped() bool {
+	return bc.procInterrupt.Load()
 }
-
-func (bc *BlockChain) GetHeaderByHash(hash common.Hash) *types.Header {
-	header, err := bc.ethClient.HeaderByHash(bc.ctx, hash)
-	if err != nil {
-		log.Error("Get block header", "hash", hash, "err", err)
-		return nil
-	}
-	return header
-}
-
-func (bc *BlockChain) GetTd(hash common.Hash, number uint64) *big.Int {
-	// TODO
-	return new(big.Int)
-}
-
-// Engine retrieves the blockchain's consensus engine.
-func (bc *BlockChain) Engine() consensus.Engine { return bc.engine }
