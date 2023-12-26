@@ -14,9 +14,12 @@ import (
 
 // NewEVMBlockContext creates a new context for use in the EVM.
 func NewEVMBlockContext(header *types.Header, chain core.ChainContext, author *common.Address, config *params.ChainConfig) vm.BlockContext {
-	ctx := core.NewEVMBlockContext(header, chain, author)
+	// Set coinbase to beneficiary address.
+	if author == nil {
+		author = &params.BeneficiaryAddress
+	}
 
-	ctx.Coinbase = config.Mive.BeneficiaryAddress
+	ctx := core.NewEVMBlockContext(header, chain, author)
 
 	feeReductionDenom := new(big.Int).SetUint64(config.FeeReductionDenominator())
 	if ctx.BaseFee != nil {
@@ -26,14 +29,18 @@ func NewEVMBlockContext(header *types.Header, chain core.ChainContext, author *c
 		ctx.BlobBaseFee = new(big.Int).Div(ctx.BlobBaseFee, feeReductionDenom)
 	}
 
-	gasLimit, overflow := cmath.SafeMul(ctx.GasLimit, config.BlockGasLimitMultiplier())
+	ctx.GasLimit = blockGasLimit(ctx.GasLimit, config)
+
+	return ctx
+}
+
+func blockGasLimit(gasLimit uint64, config *params.ChainConfig) uint64 {
+	gasLimit, overflow := cmath.SafeMul(gasLimit, config.BlockGasLimitMultiplier())
 	if overflow {
 		gasLimit = cmath.MaxUint64
 	}
 	if gasLimit < config.MinBlockGasLimit() {
 		gasLimit = config.MinBlockGasLimit()
 	}
-	ctx.GasLimit = gasLimit
-
-	return ctx
+	return gasLimit
 }

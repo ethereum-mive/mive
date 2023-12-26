@@ -44,7 +44,7 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, cfg
 		blockHash   = block.Hash()
 		blockNumber = block.Number()
 		allLogs     []*types.Log
-		gp          = new(core.GasPool).AddGas(block.GasLimit())
+		gp          = new(core.GasPool).AddGas(blockGasLimit(block.GasLimit(), p.config))
 	)
 	// Mutate the block and state according to any hard-fork specs
 	if p.config.Eth.DAOForkSupport && p.config.Eth.DAOForkBlock != nil && p.config.Eth.DAOForkBlock.Cmp(block.Number()) == 0 {
@@ -76,8 +76,7 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, cfg
 		receipts = append(receipts, receipt)
 		allLogs = append(allLogs, receipt.Logs...)
 	}
-	// Finalize the block, applying any consensus engine specific extras (e.g. block rewards)
-	p.engine.Finalize(p.bc, header, statedb, block.Transactions(), block.Uncles(), nil)
+	// Note: no block finalization is needed here (e.g. uncle processing, block reward, etc.)
 
 	return receipts, allLogs, *usedGas, nil
 }
