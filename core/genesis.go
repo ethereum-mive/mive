@@ -207,12 +207,12 @@ func (g *Genesis) IsVerkle(block *types.Block) bool {
 }
 
 // ToHeader returns the genesis block header according to genesis specification.
-func (g *Genesis) ToHeader(block *types.Block) *mivetypes.MiveHeader {
+func (g *Genesis) ToHeader(block *types.Block) *mivetypes.Header {
 	root, err := g.Alloc.hash(g.IsVerkle(block), block.NumberU64())
 	if err != nil {
 		panic(err)
 	}
-	return &mivetypes.MiveHeader{
+	return &mivetypes.Header{
 		ParentHash:  block.ParentHash(),
 		Hash:        block.Hash(),
 		Number:      block.Number(),
@@ -222,7 +222,7 @@ func (g *Genesis) ToHeader(block *types.Block) *mivetypes.MiveHeader {
 	}
 }
 
-func (g *Genesis) Commit(db ethdb.Database, triedb *trie.Database, block *types.Block) (*mivetypes.MiveHeader, error) {
+func (g *Genesis) Commit(db ethdb.Database, triedb *trie.Database, block *types.Block) (*mivetypes.Header, error) {
 	header := g.ToHeader(block)
 	config := g.Config
 	if err := config.CheckConfigForkOrder(); err != nil {

@@ -8,11 +8,11 @@ import (
 	"github.com/ethereum/go-ethereum/core/types"
 )
 
-//go:generate go run github.com/fjl/gencodec -type MiveHeader -field-override headerMarshaling -out gen_header_json.go
-//go:generate go run github.com/ethereum/go-ethereum/rlp/rlpgen -type MiveHeader -out gen_header_rlp.go
+//go:generate go run github.com/fjl/gencodec -type Header -field-override headerMarshaling -out gen_header_json.go
+//go:generate go run github.com/ethereum/go-ethereum/rlp/rlpgen -type Header -out gen_header_rlp.go
 
-// MiveHeader represents a block header in Mive.
-type MiveHeader struct {
+// Header represents a block header in Mive.
+type Header struct {
 	ParentHash common.Hash `json:"parentHash" gencodec:"required"`
 	Hash       common.Hash `json:"hash"       gencodec:"required"`
 	Number     *big.Int    `json:"number"     gencodec:"required"`
@@ -28,4 +28,13 @@ type MiveHeader struct {
 type headerMarshaling struct {
 	Number  *hexutil.Big
 	GasUsed hexutil.Uint64
+}
+
+// CopyHeader creates a deep copy of a block header.
+func CopyHeader(h *Header) *Header {
+	cpy := *h
+	if cpy.Number = new(big.Int); h.Number != nil {
+		cpy.Number.Set(h.Number)
+	}
+	return &cpy
 }

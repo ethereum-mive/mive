@@ -2,11 +2,13 @@ package core
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/common/lru"
 	"github.com/ethereum/go-ethereum/common/prque"
 	"github.com/ethereum/go-ethereum/consensus"
 	"github.com/ethereum/go-ethereum/core"
@@ -17,12 +19,60 @@ import (
 	"github.com/ethereum/go-ethereum/core/vm"
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/ethereum/go-ethereum/ethdb"
+	"github.com/ethereum/go-ethereum/event"
+	"github.com/ethereum/go-ethereum/exports/syncx"
+	"github.com/ethereum/go-ethereum/metrics"
 	gethparams "github.com/ethereum/go-ethereum/params"
+	"github.com/ethereum/go-ethereum/rlp"
 	"github.com/ethereum/go-ethereum/trie"
 	"github.com/ethereum/go-ethereum/trie/triedb/hashdb"
 	"github.com/ethereum/go-ethereum/trie/triedb/pathdb"
 
+	mivetypes "github.com/ethereum-mive/mive/core/types"
 	"github.com/ethereum-mive/mive/params"
+)
+
+var (
+	headBlockGauge          = metrics.NewRegisteredGauge("chain/head/block", nil)
+	headHeaderGauge         = metrics.NewRegisteredGauge("chain/head/header", nil)
+	headFastBlockGauge      = metrics.NewRegisteredGauge("chain/head/receipt", nil)
+	headFinalizedBlockGauge = metrics.NewRegisteredGauge("chain/head/finalized", nil)
+	headSafeBlockGauge      = metrics.NewRegisteredGauge("chain/head/safe", nil)
+
+	chainInfoGauge = metrics.NewRegisteredGaugeInfo("chain/info", nil)
+
+	accountReadTimer   = metrics.NewRegisteredTimer("chain/account/reads", nil)
+	accountHashTimer   = metrics.NewRegisteredTimer("chain/account/hashes", nil)
+	accountUpdateTimer = metrics.NewRegisteredTimer("chain/account/updates", nil)
+	accountCommitTimer = metrics.NewRegisteredTimer("chain/account/commits", nil)
+
+	storageReadTimer   = metrics.NewRegisteredTimer("chain/storage/reads", nil)
+	storageHashTimer   = metrics.NewRegisteredTimer("chain/storage/hashes", nil)
+	storageUpdateTimer = metrics.NewRegisteredTimer("chain/storage/updates", nil)
+	storageCommitTimer = metrics.NewRegisteredTimer("chain/storage/commits", nil)
+
+	snapshotAccountReadTimer = metrics.NewRegisteredTimer("chain/snapshot/account/reads", nil)
+	snapshotStorageReadTimer = metrics.NewRegisteredTimer("chain/snapshot/storage/reads", nil)
+	snapshotCommitTimer      = metrics.NewRegisteredTimer("chain/snapshot/commits", nil)
+
+	triedbCommitTimer = metrics.NewRegisteredTimer("chain/triedb/commits", nil)
+
+	blockInsertTimer     = metrics.NewRegisteredTimer("chain/inserts", nil)
+	blockValidationTimer = metrics.NewRegisteredTimer("chain/validation", nil)
+	blockExecutionTimer  = metrics.NewRegisteredTimer("chain/execution", nil)
+	blockWriteTimer      = metrics.NewRegisteredTimer("chain/write", nil)
+
+	blockReorgMeter     = metrics.NewRegisteredMeter("chain/reorg/executes", nil)
+	blockReorgAddMeter  = metrics.NewRegisteredMeter("chain/reorg/add", nil)
+	blockReorgDropMeter = metrics.NewRegisteredMeter("chain/reorg/drop", nil)
+
+	blockPrefetchExecuteTimer   = metrics.NewRegisteredTimer("chain/prefetch/executes", nil)
+	blockPrefetchInterruptMeter = metrics.NewRegisteredMeter("chain/prefetch/interrupts", nil)
+
+	errInsertionInterrupted = errors.New("insertion is interrupted")
+	errChainStopped         = errors.New("blockchain is stopped")
+	errInvalidOldChain      = errors.New("invalid old chain")
+	errInvalidNewChain      = errors.New("invalid new chain")
 )
 
 // triedbConfig derives the configures for trie database.
@@ -63,13 +113,43 @@ type BlockChain struct {
 	//  * nil: disable tx reindexer/deleter, but still index new blocks
 	txLookupLimit uint64
 
+	hc            *HeaderChain
+	rmLogsFeed    event.Feed
+	chainFeed     event.Feed
+	chainSideFeed event.Feed
+	chainHeadFeed event.Feed
+	logsFeed      event.Feed
+	blockProcFeed event.Feed
+	scope         event.SubscriptionScope
+	genesisHeader *mivetypes.Header
+
+	// This mutex synchronizes chain write operations.
+	// Readers don't need to take it, they can just read the database.
+	chainmu *syncx.ClosableMutex
+
+	currentBlock      atomic.Pointer[mivetypes.Header] // Current head of the chain
+	currentSnapBlock  atomic.Pointer[mivetypes.Header] // Current head of snap-sync
+	currentFinalBlock atomic.Pointer[mivetypes.Header] // Latest (consensus) finalized block
+	currentSafeBlock  atomic.Pointer[mivetypes.Header] // Latest (consensus) safe block
+
+	bodyCache     *lru.Cache[common.Hash, *types.Body]
+	bodyRLPCache  *lru.Cache[common.Hash, rlp.RawValue]
+	receiptsCache *lru.Cache[common.Hash, []*types.Receipt]
+	blockCache    *lru.Cache[common.Hash, *types.Block]
+	txLookupCache *lru.Cache[common.Hash, *rawdb.LegacyTxLookupEntry]
+
+	// future blocks are blocks added for later processing
+	futureBlocks *lru.Cache[common.Hash, *types.Block]
+
 	wg            sync.WaitGroup //
 	quit          chan struct{}  // shutdown signal, closed in Stop.
 	stopping      atomic.Bool    // false if chain is running, true when stopped
 	procInterrupt atomic.Bool    // interrupt signaler for block processing
 
 	engine     consensus.Engine
+	validator  core.Validator // Block and state validator interface
 	prefetcher core.Prefetcher
+	processor  core.Processor // Block transaction processor interface
 	vmConfig   vm.Config
 
 	ethClient *ethclient.Client

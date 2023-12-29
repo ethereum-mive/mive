@@ -11,12 +11,12 @@ import (
 )
 
 // ReadHeader retrieves the block header corresponding to the hash.
-func ReadHeader(db ethdb.Reader, hash common.Hash, number uint64) *mivetypes.MiveHeader {
+func ReadHeader(db ethdb.Reader, hash common.Hash, number uint64) *mivetypes.Header {
 	data := rawdb.ReadHeaderRLP(db, hash, number)
 	if len(data) == 0 {
 		return nil
 	}
-	header := new(mivetypes.MiveHeader)
+	header := new(mivetypes.Header)
 	if err := rlp.DecodeBytes(data, header); err != nil {
 		log.Error("Invalid block header RLP", "hash", hash, "err", err)
 		return nil
@@ -26,7 +26,7 @@ func ReadHeader(db ethdb.Reader, hash common.Hash, number uint64) *mivetypes.Miv
 
 // WriteHeader stores a block header into the database and also stores the hash-
 // to-number mapping.
-func WriteHeader(db ethdb.KeyValueWriter, header *mivetypes.MiveHeader) {
+func WriteHeader(db ethdb.KeyValueWriter, header *mivetypes.Header) {
 	var (
 		hash   = header.Hash
 		number = header.Number.Uint64()
@@ -46,7 +46,7 @@ func WriteHeader(db ethdb.KeyValueWriter, header *mivetypes.MiveHeader) {
 }
 
 // ReadHeadHeader returns the current canonical head header.
-func ReadHeadHeader(db ethdb.Reader) *mivetypes.MiveHeader {
+func ReadHeadHeader(db ethdb.Reader) *mivetypes.Header {
 	headHeaderHash := rawdb.ReadHeadHeaderHash(db)
 	if headHeaderHash == (common.Hash{}) {
 		return nil
