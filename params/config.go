@@ -48,3 +48,14 @@ func (c *ChainConfig) BlockGasLimitMultiplier() uint64 {
 func (c *ChainConfig) MinBlockGasLimit() uint64 {
 	return DefaultMinBlockGasLimit
 }
+
+// CheckCompatible checks whether scheduled fork transitions have been imported
+// with a mismatching chain configuration.
+func (c *ChainConfig) CheckCompatible(newcfg *ChainConfig, height uint64, time uint64) *params.ConfigCompatError {
+	return c.Eth.CheckCompatible(newcfg.Eth, height, time)
+}
+
+// CheckConfigForkOrder checks that we don't "skip" any forks.
+func (c *ChainConfig) CheckConfigForkOrder() error {
+	return c.Eth.CheckConfigForkOrder()
+}
