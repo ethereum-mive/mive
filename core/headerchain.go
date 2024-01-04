@@ -47,7 +47,7 @@ type HeaderChain struct {
 	chainDb       ethdb.Database
 	genesisHeader *mivetypes.Header
 
-	currentHeader atomic.Value // Current head of the header chain (may be above the block chain!)
+	currentHeader atomic.Value // Current head of the header chain (maybe above the blockchain!)
 
 	headerCache *lru.Cache[common.Hash, *mivetypes.Header]
 	numberCache *lru.Cache[common.Hash, uint64] // most recent block numbers
@@ -243,7 +243,8 @@ func (hc *HeaderChain) writeHeadersAndSetHead(headers []*mivetypes.Header) (*hea
 	)
 	// Special case, all the inserted headers are already on the canonical
 	// header chain, skip the reorg operation.
-	if hc.GetCanonicalHash(lastHeader.Number.Uint64()) == lastHash && lastHeader.Number.Uint64() <= hc.CurrentHeader().Number.Uint64() {
+	if hc.GetCanonicalHash(lastHeader.Number.Uint64()) == lastHash &&
+		lastHeader.Number.Uint64() <= hc.CurrentHeader().Number.Uint64() {
 		return result, nil
 	}
 	// Apply the reorg operation
@@ -329,7 +330,7 @@ func (hc *HeaderChain) InsertHeaderChain(chain []*mivetypes.Header, start time.T
 		context = append(context, []interface{}{"ignored", res.ignored}...)
 	}
 	log.Debug("Imported new block headers", context...)
-	return res.status, err
+	return res.status, nil
 }
 
 // GetAncestor retrieves the Nth ancestor of a given block. It assumes that either the given block or
@@ -471,6 +472,132 @@ func (hc *HeaderChain) CurrentHeader() *mivetypes.Header {
 func (hc *HeaderChain) SetCurrentHeader(head *mivetypes.Header) {
 	hc.currentHeader.Store(head)
 	headHeaderGauge.Update(head.Number.Int64())
+}
+
+type (
+	// UpdateHeadBlocksCallback is a callback function that is called by SetHead
+	// before head header is updated. The method will return the actual block it
+	// updated the head to (missing state) and a flag if setHead should continue
+	// rewinding till that forcefully (exceeded ancient limits)
+	UpdateHeadBlocksCallback func(ethdb.KeyValueWriter, *mivetypes.Header) (*mivetypes.Header, bool)
+
+	// DeleteBlockContentCallback is a callback function that is called by SetHead
+	// before each header is deleted.
+	DeleteBlockContentCallback = core.DeleteBlockContentCallback
+)
+
+// SetHead rewinds the local chain to a new head. Everything above the new head
+// will be deleted and the new one set.
+func (hc *HeaderChain) SetHead(head uint64, updateFn UpdateHeadBlocksCallback, delFn DeleteBlockContentCallback) {
+	hc.setHead(head, 0, updateFn, delFn)
+}
+
+// SetHeadWithTimestamp rewinds the local chain to a new head timestamp. Everything
+// above the new head will be deleted and the new one set.
+func (hc *HeaderChain) SetHeadWithTimestamp(time uint64, updateFn UpdateHeadBlocksCallback, delFn DeleteBlockContentCallback) {
+	hc.setHead(0, time, updateFn, delFn)
+}
+
+// setHead rewinds the local chain to a new head block or a head timestamp.
+// Everything above the new head will be deleted and the new one set.
+func (hc *HeaderChain) setHead(headBlock uint64, headTime uint64, updateFn UpdateHeadBlocksCallback, delFn DeleteBlockContentCallback) {
+	// Sanity check that there's no attempt to undo the genesis block. This is
+	// a fairly synthetic case where someone enables a timestamp based fork
+	// below the genesis timestamp. It's nice to not allow that instead of the
+	// entire chain getting deleted.
+	if headTime > 0 && hc.genesisHeader.Time > headTime {
+		// Note, a critical error is quite brutal, but we should really not reach
+		// this point. Since pre-timestamp based forks it was impossible to have
+		// a fork before block 0, the setHead would always work. With timestamp
+		// forks it becomes possible to specify below the genesis. That said, the
+		// only time we setHead via timestamp is with chain config changes on the
+		// startup, so failing hard there is ok.
+		log.Crit("Rejecting genesis rewind via timestamp", "target", headTime, "genesis", hc.genesisHeader.Time)
+	}
+	var (
+		parentHash common.Hash
+		batch      = hc.chainDb.NewBatch()
+		origin     = true
+	)
+	done := func(header *mivetypes.Header) bool {
+		if headTime > 0 {
+			return header.Time <= headTime
+		}
+		return header.Number.Uint64() <= headBlock
+	}
+	for hdr := hc.CurrentHeader(); hdr != nil && !done(hdr); hdr = hc.CurrentHeader() {
+		num := hdr.Number.Uint64()
+
+		// Rewind chain to new head
+		parent := hc.GetHeader(hdr.ParentHash, num-1)
+		if parent == nil {
+			parent = hc.genesisHeader
+		}
+		parentHash = parent.Hash
+
+		// Notably, since mive has the possibility for setting the head to a low
+		// height which is even lower than ancient head.
+		// In order to ensure that the head is always no higher than the data in
+		// the database (ancient store or active store), we need to update head
+		// first then remove the relative data from the database.
+		//
+		// Update head first(head fast block, head full block) before deleting the data.
+		markerBatch := hc.chainDb.NewBatch()
+		if updateFn != nil {
+			newHead, force := updateFn(markerBatch, parent)
+			if force && ((headTime > 0 && newHead.Time < headTime) || (headTime == 0 && newHead.Number.Uint64() < headBlock)) {
+				log.Warn("Force rewinding till ancient limit", "head", newHead.Number.Uint64())
+				headBlock, headTime = newHead.Number.Uint64(), 0 // Target timestamp passed, continue rewind in block mode (cleaner)
+			}
+		}
+		// Update head header then.
+		rawdb.WriteHeadHeaderHash(markerBatch, parentHash)
+		if err := markerBatch.Write(); err != nil {
+			log.Crit("Failed to update chain markers", "error", err)
+		}
+		hc.currentHeader.Store(parent)
+		headHeaderGauge.Update(parent.Number.Int64())
+
+		// If this is the first iteration, wipe any leftover data upwards too,
+		// so we don't end up with dangling daps in the database
+		var nums []uint64
+		if origin {
+			for n := num + 1; len(rawdb.ReadAllHashes(hc.chainDb, n)) > 0; n++ {
+				nums = append([]uint64{n}, nums...) // suboptimal, but we don't really expect this path
+			}
+			origin = false
+		}
+		nums = append(nums, num)
+
+		// Remove the related data from the database on all sidechains
+		for _, num := range nums {
+			// Gather all the side fork hashes
+			hashes := rawdb.ReadAllHashes(hc.chainDb, num)
+			if len(hashes) == 0 {
+				// No hashes in the database whatsoever, probably frozen already
+				hashes = append(hashes, hdr.Hash)
+			}
+			for _, hash := range hashes {
+				if delFn != nil {
+					delFn(batch, hash, num)
+				}
+				rawdb.DeleteHeader(batch, hash, num)
+			}
+			rawdb.DeleteCanonicalHash(batch, num)
+		}
+	}
+	// Flush all accumulated deletions.
+	if err := batch.Write(); err != nil {
+		log.Crit("Failed to rewind block", "error", err)
+	}
+	// Clear out any stale content from the caches
+	hc.headerCache.Purge()
+	hc.numberCache.Purge()
+}
+
+// SetGenesis sets a new genesis block header for the chain
+func (hc *HeaderChain) SetGenesis(head *mivetypes.Header) {
+	hc.genesisHeader = head
 }
 
 // Config retrieves the header chain's chain configuration.

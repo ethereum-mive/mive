@@ -9,8 +9,8 @@ import (
 	"github.com/ethereum/go-ethereum/rlp"
 )
 
-// MiveTx represents a Mive transaction.
-type MiveTx struct {
+// Tx represents a Mive transaction.
+type Tx struct {
 	Gas        uint64           // gas limit
 	To         *common.Address  `rlp:"nil"` // nil means contract creation
 	Value      *big.Int         // wei amount
@@ -19,11 +19,11 @@ type MiveTx struct {
 }
 
 // EncodeRLP implements rlp.Encoder
-func (tx *MiveTx) EncodeRLP(w io.Writer) error {
+func (tx *Tx) EncodeRLP(w io.Writer) error {
 	return rlp.Encode(w, tx)
 }
 
 // DecodeRLP implements rlp.Decoder
-func (tx *MiveTx) DecodeRLP(s *rlp.Stream) error {
+func (tx *Tx) DecodeRLP(s *rlp.Stream) error {
 	return s.Decode(tx)
 }

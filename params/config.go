@@ -1,6 +1,7 @@
 package params
 
 import (
+	"fmt"
 	"math/big"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -58,4 +59,17 @@ func (c *ChainConfig) CheckCompatible(newcfg *ChainConfig, height uint64, time u
 // CheckConfigForkOrder checks that we don't "skip" any forks.
 func (c *ChainConfig) CheckConfigForkOrder() error {
 	return c.Eth.CheckConfigForkOrder()
+}
+
+// Description returns a human-readable description of ChainConfig.
+func (c *ChainConfig) Description() string {
+	var banner string
+
+	network := params.NetworkNames[c.Eth.ChainID.String()]
+	if network == "" {
+		network = "unknown"
+	}
+	banner += fmt.Sprintf("Master Chain ID:  %v (%s)\n", c.Eth.ChainID, network)
+
+	return banner
 }

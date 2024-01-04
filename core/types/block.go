@@ -38,3 +38,5 @@ func CopyHeader(h *Header) *Header {
 	}
 	return &cpy
 }
+
+func (h *Header) NumberU64() uint64 { return h.Number.Uint64() }

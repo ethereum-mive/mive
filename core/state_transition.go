@@ -5,21 +5,21 @@ import (
 
 	cmath "github.com/ethereum/go-ethereum/common/math"
 	"github.com/ethereum/go-ethereum/core"
-	gethtypes "github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/rlp"
 
-	"github.com/ethereum-mive/mive/core/types"
+	mivetypes "github.com/ethereum-mive/mive/core/types"
 	"github.com/ethereum-mive/mive/params"
 )
 
 // TransactionToMessage converts a transaction into a Message.
-func TransactionToMessage(tx *gethtypes.Transaction, s gethtypes.Signer, baseFee *big.Int, config *params.ChainConfig) (*core.Message, error) {
+func TransactionToMessage(tx *types.Transaction, s types.Signer, baseFee *big.Int, config *params.ChainConfig) (*core.Message, error) {
 	if tx.To() == nil || *tx.To() != config.Mive.BeaconAddress {
 		// The transaction is not sent to the beacon address.
 		return nil, nil
 	}
-	if tx.Type() == gethtypes.BlobTxType {
+	if tx.Type() == types.BlobTxType {
 		// We don't support blob transaction type.
 		return nil, nil
 	}
@@ -28,7 +28,7 @@ func TransactionToMessage(tx *gethtypes.Transaction, s gethtypes.Signer, baseFee
 	}
 
 	// Decode Mive transaction from the data payload of the original Ethereum transaction.
-	var mtx types.MiveTx
+	var mtx mivetypes.Tx
 	err := rlp.DecodeBytes(tx.Data(), &mtx)
 	if err != nil {
 		log.Warn("Decode Mive transaction", "hash", tx.Hash(), "err", err)
@@ -57,6 +57,6 @@ func TransactionToMessage(tx *gethtypes.Transaction, s gethtypes.Signer, baseFee
 		reductedBaseFee := new(big.Int).Div(baseFee, feeReductionDenom)
 		msg.GasPrice = cmath.BigMin(msg.GasPrice.Add(msg.GasTipCap, reductedBaseFee), msg.GasFeeCap)
 	}
-	msg.From, err = gethtypes.Sender(s, tx)
+	msg.From, err = types.Sender(s, tx)
 	return msg, err
 }
